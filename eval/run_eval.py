@@ -24,16 +24,35 @@ NUM_TRIALS = 1
 SAMPLE_FRAC = float(os.environ.get("SAMPLE_FRAC", "1.0"))  # e.g. 0.1 for 10%
 MODEL = os.environ.get("SOLVER_MODEL", "gpt-4.1-mini")
 USER_MODEL = os.environ.get("USER_MODEL", "gpt-4.1-2025-04-14")
+EVAL_LITE = os.environ.get("EVAL_LITE", "0") == "1"
+MAX_CONCURRENCY = int(os.environ.get("EVAL_CONCURRENCY", "12"))
+
+LITE_TASK_CLUSTERS = {
+    "canary":               ["task_001", "task_004", "task_007", "task_076"],
+    "playbook_trap":        ["task_033"],
+    "dispute_calculator":   ["task_017", "task_018", "task_021", "task_026", "task_040"],
+    "execution_discipline": ["task_036", "task_087", "task_100"],
+    "variance_band":        ["task_006", "task_016", "task_035"],
+    "escalation":           ["task_005", "task_091"],
+    "recently_flipped":     ["task_019", "task_024"],
+}
 
 
 def run_all():
     all_tasks = get_tasks(task_set_name=DOMAIN, task_split_name=SPLIT)
-    n_sample = max(1, int(len(all_tasks) * SAMPLE_FRAC))
-    random.seed(42)
-    sampled = random.sample(all_tasks, n_sample)
-    task_ids = [t.id for t in sampled]
+    if EVAL_LITE:
+        lite_ids = [tid for cluster in LITE_TASK_CLUSTERS.values() for tid in cluster]
+        id_to_task = {t.id: t for t in all_tasks}
+        sampled = [id_to_task[tid] for tid in lite_ids if tid in id_to_task]
+        task_ids = [t.id for t in sampled]
+        print(f"\n=== {DOMAIN.upper()} LITE ({len(task_ids)}/{len(all_tasks)} curated tasks) ===", file=sys.stderr)
+    else:
+        n_sample = max(1, int(len(all_tasks) * SAMPLE_FRAC))
+        random.seed(42)
+        sampled = random.sample(all_tasks, n_sample)
+        task_ids = [t.id for t in sampled]
+        print(f"\n=== {DOMAIN.upper()} ({n_sample}/{len(all_tasks)} tasks) ===", file=sys.stderr)
 
-    print(f"\n=== {DOMAIN.upper()} ({n_sample}/{len(all_tasks)} tasks) ===", file=sys.stderr)
     config = TextRunConfig(
         domain=DOMAIN,
         task_split_name=SPLIT,
@@ -50,6 +69,7 @@ def run_all():
         seed=300,
         save_to=f"eval_{DOMAIN}",
         log_level="WARNING",
+        max_concurrency=MAX_CONCURRENCY,
     )
     results = run_domain(config)
     metrics = compute_metrics(results)
@@ -60,6 +80,24 @@ def run_all():
     correct = int(round(pass1 * n_tasks))
 
     print(f"  tasks: {n_tasks}, pass^1: {pass1:.4f}, cost: ${cost:.2f}", file=sys.stderr)
+
+    if EVAL_LITE:
+        sim_by_task = {}
+        for sim in results.simulations:
+            r = getattr(sim.reward_info, "reward", 0.0) if sim.reward_info else 0.0
+            sim_by_task[sim.task_id] = r
+        print("  Per-cluster breakdown:", file=sys.stderr)
+        for cluster, ids in LITE_TASK_CLUSTERS.items():
+            marks, passed, total = [], 0, 0
+            for tid in ids:
+                if tid not in sim_by_task:
+                    continue
+                total += 1
+                ok = sim_by_task[tid] >= 1.0
+                if ok:
+                    passed += 1
+                marks.append(f"{tid}{'✓' if ok else '✗'}")
+            print(f"    {cluster:22s} {passed}/{total}  [{', '.join(marks)}]", file=sys.stderr)
 
     print("---")
     print(f"accuracy:         {pass1:.6f}")
