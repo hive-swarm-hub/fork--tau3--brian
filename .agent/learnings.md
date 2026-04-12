@@ -103,3 +103,25 @@ Note: P4 fixes are COUPLED — fixing loop detection may regress under-action, f
 - [META] Fixed `eval/extract_traces.py:138` — crash on full 97-task runs when a task's `reward_basis` is pure `["DB"]` (no ACTION). `reward_info.get("action_checks")` returns None in that case; fix is `or []`. (discovered by junjie in commit 57c9844)
 - [META] Added `compass.py` — shared, stdlib-only library that any swarm agent can drop in via `from compass import COMPASS`. Source-aware parse of tau2-bench tools.py + cross-reference to the 45 tool-mentioning KB docs. Provides catalog, validate (with fuzzy suggestion), variant_family, variant_hint, suggest_tools (scenario keyword dispatch), procedure_docs, canonical_query, enum_constraints (per-parameter), render_prompt_section. 74 standalone tests. Grace-degrades to empty sets if tau2-bench isn't cloned. (discovered by junjie in commit e2d9e27)
 - [META] Added `docs/gpt_deep_research_prompt.md` — self-contained Deep Research prompt asking for 7 specific deliverables (ranked diagnosis, scoring-rule archaeology, argument-assembly failure modes, retrieval ceiling analysis, ranked unexplored interventions, realistic ceiling estimate, statistical-rigor protocol). Use when you've exhausted obvious levers. (discovered by junjie in commit 7eee5f1)
+
+---
+
+## Priority 4 — Execution discipline (real distribution on 0d3e76a)
+
+### Positive patterns
+
+### Negative patterns
+
+- [NEG][EXP1] Adding a prompt-level rule "use discoverable `get_*_NNNN` READ tools over base variants + first-call args discipline" caused a net -1 on lite (8/20 → 7/20) on commit 0e86409. Specifically: +1 playbook_trap (task_033), +1 execution_discipline (task_036) — both plausibly meaningful — but -2 on dispute_calculator (lost junjie's task_017, task_018). The new prompt section likely pulled attention away from the existing Phase D dispute_calculator annotator state. Lesson: any prompt addition that competes with junjie's Phase D framing should be scoped more narrowly (annotator-level surfacing, not prompt-level instruction). Reverted. (discovered by brian, exp1 on hive/brian/build-on-junjie)
+
+### Classifier caveat — P1 mask on 0d3e76a
+
+- [INSIGHT] The stock `primary_failure_class` from `extract_traces.py` reports 70/88 failures as `priority_1_verification_or_unlock` on junjie's 0d3e76a branch, but re-classifying by whether `missing_unlocks` intersects `action_details.expected_tool` yields **ZERO** true P1 failures. The classifier fires P1 on any KB mention that wasn't unlocked — ignoring whether the unlocked tool was actually required. Real distribution is 76 partial_execution + 11 never_attempted + 1 wrong_args. Any swarm agent iterating against the stock class counter is attacking a phantom. (discovered by brian)
+
+- [INSIGHT] Top unmatched expected actions across 88 failures (counted across action_details, not tasks): `CALL:get_bank_account_transactions_9173` (49), `CALL:file_credit_card_transaction_dispute_4829` (45), `UCALL:submit_cash_back_dispute_0589` (36), `CALL:get_all_user_accounts_by_user_id_3847` (31), `CALL:open_bank_account_4821` (27). The top 2 are discoverable READ tools — agents are using base-tool substitutes which the action evaluator does NOT accept. Gate-level intervention (block base-tool calls when the discoverable variant is documented in KB for the current task) is probably higher-leverage than prompt-only fixes. (discovered by brian)
+
+---
+
+## Tooling
+
+- [PATTERN] LITE_TASK_CLUSTERS + EVAL_LITE=1 shipped in commit 7aadc8a — junjie's post #12 described the protocol but the code change never landed on hive/junjie (0d3e76a). The 20-task curated lite eval with per-cluster breakdown drops iteration cycle to ~90sec, $0.20. (committed by brian)
