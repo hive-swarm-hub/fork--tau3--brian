@@ -507,6 +507,7 @@ def parse_response(choice):
 
 MAX_RETRIES = 3
 LOOP_BREAK_LIMIT = 5  # Force text response after N consecutive tool calls to break search loops
+PHASE2_ESCAPE_TURNS = 6  # After this many turns since give_discoverable_user_tool, unblock Phase-2 guard
 
 
 class BankingAgentState:
@@ -670,6 +671,7 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
                     target = args.get("discoverable_tool_name") or args.get("tool_name")
                     if target:
                         self._task_state["unlocked_for_user"].add(target)
+                        self._task_state.setdefault("give_turn", {})[target] = self._task_state["turn_count"]
                 elif tc.name in ("KB_search", "kb_search", "search_knowledge_base"):
                     self._task_state["kb_search_count"] += 1
                 # Domain-specific identity tracking: the extension decides
@@ -979,25 +981,46 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
             if name == "call_discoverable_agent_tool" and isinstance(args, dict):
                 target_tool = args.get("agent_tool_name") or ""
                 user_calls = self._task_state.get("user_calls_by_tool", {})
+                give_turns = self._task_state.get("give_turn", {})
                 blocked = False
                 for given_tool, agent_prefixes in phase2_pairs.items():
                     if given_tool not in unlocked_user:
                         continue
-                    if any(target_tool.startswith(p) for p in agent_prefixes):
-                        if user_calls.get(given_tool, 0) == 0:
-                            log.append({
-                                "turn": turn,
-                                "reason": "blocked_phase2_before_user_call",
-                                "target": target_tool,
-                                "given_tool": given_tool,
-                            })
-                            drop_notes.append(
-                                f"I gave you the tool {given_tool} earlier — please call it "
-                                f"with the specific transaction details first. I will only "
-                                f"update the backend records after the customer has submitted."
-                            )
-                            blocked = True
-                            break
+                    if not any(target_tool.startswith(p) for p in agent_prefixes):
+                        continue
+                    # Escape hatch: if we gave the tool more than
+                    # PHASE2_ESCAPE_TURNS ago and the guard is still
+                    # blocking, let it through. The agent can't see the
+                    # customer's tool result (arrives as part of the user
+                    # simulator turn, not as a ToolMessage to the agent),
+                    # so user_calls stays at 0 forever. Without this
+                    # escape, the guard loops for 200 turns (task_027,
+                    # task_028, task_043, task_044, task_080, task_084).
+                    gave_at = give_turns.get(given_tool, turn)
+                    turns_since_give = turn - gave_at
+                    if turns_since_give > PHASE2_ESCAPE_TURNS:
+                        log.append({
+                            "turn": turn,
+                            "reason": "phase2_escape_hatch",
+                            "target": target_tool,
+                            "given_tool": given_tool,
+                            "turns_since_give": turns_since_give,
+                        })
+                        break
+                    if user_calls.get(given_tool, 0) == 0:
+                        log.append({
+                            "turn": turn,
+                            "reason": "blocked_phase2_before_user_call",
+                            "target": target_tool,
+                            "given_tool": given_tool,
+                        })
+                        drop_notes.append(
+                            f"I gave you the tool {given_tool} earlier — please call it "
+                            f"with the specific transaction details first. I will only "
+                            f"update the backend records after the customer has submitted."
+                        )
+                        blocked = True
+                        break
                 if blocked:
                     continue
 
