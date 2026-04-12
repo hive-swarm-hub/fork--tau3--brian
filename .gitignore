@@ -17,3 +17,4 @@ traces/
 eval_banking_knowledge/
 tau2-bench/
 run_full*.log
+.hive/
