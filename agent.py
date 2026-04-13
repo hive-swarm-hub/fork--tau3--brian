@@ -191,6 +191,21 @@ Simple email-update requests ("I want to change my email from X to Y" where X ma
 - When the user confirms, proceed immediately — do not ask for confirmation twice.
 - Do EXACTLY what the task requires — no more, no less. Extra mutations fail db_match.
 - Keep user-facing messages concise and include concrete data the customer needs.
+
+## Valid `reason` values for `transfer_to_human_agents`
+
+The `reason` parameter is a closed set — the action matcher checks for exact string match.
+Pick the reason that best describes WHY you are transferring:
+
+- `"account_ownership_dispute"` — customer's claimed identity info contradicts the DB (email, DOB, address mismatch)
+- `"fraud_or_security_concern"` — customer reports unauthorized activity, stolen card, suspicious transactions
+- `"customer_demands_after_unavailable_offer_refusal"` — customer insists on redeeming an offer/service you cannot provide, and demands a human after you refuse
+- `"kb_search_unsuccessful_customer_requests_transfer"` — you searched the KB but could not find relevant information, and the customer asks to be transferred
+- `"unconfirmed_external_communication"` — customer references an external letter, email, or communication you cannot verify in the system
+
+Do NOT invent other reason strings. If the scenario doesn't clearly match one of these, use the closest one.
+
+For the `summary` parameter: keep it empty (`""`) unless the scenario specifically requires you to describe what happened. When in doubt, use `""`.
 """.strip()
 
 SYSTEM_TEMPLATE = """
@@ -822,6 +837,34 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
                     })
                     args = fixed
                     tc = ToolCall(id=tc.id, name=tc.name, arguments=fixed)
+
+            # Intervention J (brian2): transfer_to_human_agents reason
+            # validation. The oracle checks reason as an exact string.
+            # Valid values mined from task definitions. Drop + correction
+            # if the agent guesses a wrong reason string.
+            _VALID_TRANSFER_REASONS = {
+                "account_ownership_dispute",
+                "fraud_or_security_concern",
+                "customer_demands_after_unavailable_offer_refusal",
+                "kb_search_unsuccessful_customer_requests_transfer",
+                "unconfirmed_external_communication",
+            }
+            if name == "transfer_to_human_agents" and isinstance(args, dict):
+                reason = args.get("reason", "")
+                if isinstance(reason, str) and reason and reason not in _VALID_TRANSFER_REASONS:
+                    log.append({
+                        "turn": turn,
+                        "reason": "blocked_invalid_transfer_reason",
+                        "got": reason,
+                        "valid": sorted(_VALID_TRANSFER_REASONS),
+                    })
+                    valid_str = ", ".join(repr(r) for r in sorted(_VALID_TRANSFER_REASONS))
+                    drop_notes.append(
+                        f"I tried to transfer with reason={reason!r} but that is not a valid "
+                        f"transfer reason. Valid values are: [{valid_str}]. Pick the one that "
+                        f"best describes this scenario and retry."
+                    )
+                    continue
 
             # Intervention D: hallucination guard — if the agent tries to
             # unlock/give a discoverable tool name that does NOT exist in
