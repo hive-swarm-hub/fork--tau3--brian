@@ -65,27 +65,37 @@ from interventions import (
 
 # G1: heuristic list of prefixes that identify a mutating discoverable tool.
 # All banking "action" tools I've seen in the inventory start with one of these.
+# NOTE: "transfer_" is excluded — transfer_to_human_agents is an escalation,
+# not a DB mutation. Some tasks require transfer WITHOUT prior verification.
 MUTATION_PREFIXES: tuple[str, ...] = (
     "change_",
     "update_",
     "submit_",
     "open_",
     "close_",
-    "transfer_",
     "apply_",
     "delete_",
     "cancel_",
     "create_",
     "set_",
+    "file_",
+    "freeze_",
+    "unfreeze_",
+    "order_",
+    "activate_",
 )
+
+# Discoverable tools that start with a mutation prefix but are actually
+# READ-ONLY (no DB side effects). Exempt from the verify-before-mutate gate.
+READ_ONLY_EXCEPTIONS: frozenset[str] = frozenset()
 
 # Base tools that are mutations even when called directly (not via
 # call_discoverable_agent_tool). Extend as needed.
+# NOTE: transfer_to_human_agents is deliberately excluded — it's an
+# escalation that some tasks require without prior verification.
 DIRECT_MUTATION_TOOLS: frozenset[str] = frozenset(
     {
-        # Hypothetical / representative — no authoritative list in the docs.
         "change_user_email",
-        "apply_for_credit_card",
     }
 )
 
@@ -118,6 +128,8 @@ def _inner_agent_tool_name(tc) -> Optional[str]:
 
 def _looks_like_mutation(tool_name: Optional[str]) -> bool:
     if not tool_name:
+        return False
+    if tool_name in READ_ONLY_EXCEPTIONS:
         return False
     if tool_name in DIRECT_MUTATION_TOOLS:
         return True
