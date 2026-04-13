@@ -615,6 +615,7 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
             "unlocked_for_agent": set(),    # names unlocked via unlock_discoverable_agent_tool
             "unlocked_for_user": set(),     # names given via give_discoverable_user_tool
             "kb_search_count": 0,           # how many KB_search calls have been made
+            "kb_queries": [],               # actual KB_search query strings (for gate verification)
             "gate_interventions": [],       # log of _gate_tool_calls rewrites (for debugging)
             # Commit 1 additions: user-side compliance tracking
             "user_calls_by_tool": {},       # {discoverable_tool_name: count} — populated when
@@ -689,6 +690,9 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
                         self._task_state.setdefault("give_turn", {})[target] = self._task_state["turn_count"]
                 elif tc.name in ("KB_search", "kb_search", "search_knowledge_base"):
                     self._task_state["kb_search_count"] += 1
+                    query = args.get("query", "")
+                    if query:
+                        self._task_state.setdefault("kb_queries", []).append(query.lower())
                 # Domain-specific identity tracking: the extension decides
                 # which tool names reveal a user_id. Banking uses both
                 # get_user_information_by_id and get_credit_card_transactions_by_user;
@@ -1000,6 +1004,40 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
                                     f"the FIRST call attempt."
                                 )
                                 continue
+
+            # Intervention K (brian): "look before you leap" gate for
+            # open_bank_account_4821 account_class. The agent has the valid
+            # set (Intervention I) but often picks the wrong class because it
+            # hasn't read the KB doc for the specific class it's about to use.
+            # Block the call if the agent hasn't done a KB search mentioning
+            # the chosen account_class. Forces a "verify via KB" step.
+            if (name == "call_discoverable_agent_tool"
+                    and isinstance(args, dict)
+                    and (args.get("agent_tool_name") or "") == "open_bank_account_4821"):
+                inner_str = args.get("arguments", "")
+                if isinstance(inner_str, str) and inner_str:
+                    try:
+                        inner_kwargs = json.loads(inner_str)
+                    except (json.JSONDecodeError, TypeError):
+                        inner_kwargs = {}
+                    acct_class = (inner_kwargs.get("account_class") or "").lower()
+                    if acct_class:
+                        kb_queries = self._task_state.get("kb_queries", [])
+                        # Check if any prior KB search mentioned this class
+                        class_searched = any(acct_class in q for q in kb_queries)
+                        if not class_searched:
+                            log.append({
+                                "turn": turn,
+                                "reason": "blocked_account_class_not_kb_verified",
+                                "account_class": acct_class,
+                            })
+                            drop_notes.append(
+                                f"I'm about to open a {inner_kwargs.get('account_class', '')} "
+                                f"but I haven't verified this is the right class for this "
+                                f"customer. I should KB_search for '{inner_kwargs.get('account_class', '')}' "
+                                f"to confirm eligibility and features before calling."
+                            )
+                            continue
 
             # Intervention E (Commit 1): Phase-2 guard.
             # If the agent is about to call an agent-side mutation that pairs
