@@ -181,7 +181,7 @@ REGISTRY.register(
             "call_discoverable_agent_tool) while verified_user_ids is "
             "empty. Instructs the LLM to call log_verification first."
         ),
-        status="experimental",
+        status="active",
         apply=verify_before_mutate,
     )
 )
