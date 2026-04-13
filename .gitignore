@@ -19,3 +19,4 @@ tau2-bench/
 run_*.log
 eval_runs/
 .hive/
+*.log
