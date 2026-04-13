@@ -191,6 +191,21 @@ Simple email-update requests ("I want to change my email from X to Y" where X ma
 - When the user confirms, proceed immediately — do not ask for confirmation twice.
 - Do EXACTLY what the task requires — no more, no less. Extra mutations fail db_match.
 - Keep user-facing messages concise and include concrete data the customer needs.
+
+## Valid `reason` values for `transfer_to_human_agents`
+
+The `reason` parameter is a closed set — the action matcher checks for exact string match.
+Pick the reason that best describes WHY you are transferring:
+
+- `"account_ownership_dispute"` — customer's claimed identity info contradicts the DB (email, DOB, address mismatch)
+- `"fraud_or_security_concern"` — customer reports unauthorized activity, stolen card, suspicious transactions
+- `"customer_demands_after_unavailable_offer_refusal"` — customer insists on redeeming an offer/service you cannot provide, and demands a human after you refuse
+- `"kb_search_unsuccessful_customer_requests_transfer"` — you searched the KB but could not find relevant information, and the customer asks to be transferred
+- `"unconfirmed_external_communication"` — customer references an external letter, email, or communication you cannot verify in the system
+
+Do NOT invent other reason strings. If the scenario doesn't clearly match one of these, use the closest one.
+
+For the `summary` parameter: keep it empty (`""`) unless the scenario specifically requires you to describe what happened. When in doubt, use `""`.
 """.strip()
 
 SYSTEM_TEMPLATE = """
@@ -391,32 +406,6 @@ def annotate_banking(content: str, state: dict | None = None) -> str:
                 f"Pass these EXACTLY — arg matching is strict equality."
             )
 
-    # 5b. Contextual enum surfaces — only shown when the KB doc mentions
-    # a tool with a closed enum set the docstring doesn't list. Moved from
-    # always-on system prompt to reduce noise on simple tasks (junjie #28:
-    # "System prompt additions DEGRADE simple tasks").
-    if tool_mentions:
-        # account_class for open_bank_account_4821
-        if "open_bank_account_4821" in tool_mentions:
-            if _BANKING_EXT is not None and hasattr(_BANKING_EXT, "render_account_class_prompt_section"):
-                acct_section = _BANKING_EXT.render_account_class_prompt_section()
-                if acct_section:
-                    annotations.append(acct_section)
-
-    # 5c. transfer_to_human_agents reason enum — surface when the doc
-    # mentions transfer/escalation patterns.
-    if "transfer" in content_lower or "escalat" in content_lower or "human agent" in content_lower:
-        annotations.append(
-            "TRANSFER REASON ENUM: if you call transfer_to_human_agents, the `reason` "
-            "parameter must be one of these exact strings:\n"
-            "  - 'account_ownership_dispute' — identity info contradicts DB\n"
-            "  - 'fraud_or_security_concern' — unauthorized activity, stolen card\n"
-            "  - 'customer_demands_after_unavailable_offer_refusal' — customer insists after refusal\n"
-            "  - 'kb_search_unsuccessful_customer_requests_transfer' — KB search found nothing, customer asks to transfer\n"
-            "  - 'unconfirmed_external_communication' — customer references unverifiable external communication\n"
-            "For summary: keep it empty ('') unless the scenario specifically requires a description."
-        )
-
     # PHASE D: when the calculator has identified dispute candidates but
     # the agent has NOT yet called give_discoverable_user_tool, surface a
     # high-priority CALL-TO-ACTION on every tool result. This addresses
@@ -596,10 +585,12 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
         # Substitute the catalog into the base instructions. The catalog is
         # built at module import time from tau2-bench source.
         instructions = BASE_INSTRUCTIONS.replace("{CATALOG}", _CATALOG_PROMPT_SECTION)
-        # NOTE: account_class and transfer_reason enum lists are now surfaced
-        # contextually via the annotator (only when the agent encounters a
-        # relevant KB doc or scenario), not always-on in the system prompt.
-        # junjie's post #28: "System prompt additions DEGRADE simple tasks."
+        # Inject domain-specific enum hints from the extension (e.g.,
+        # banking's KB-mined account_class map for open_bank_account_4821).
+        if _BANKING_EXT is not None and hasattr(_BANKING_EXT, "render_account_class_prompt_section"):
+            acct_section = _BANKING_EXT.render_account_class_prompt_section()
+            if acct_section:
+                instructions = instructions + "\n\n" + acct_section
         return SYSTEM_TEMPLATE.format(
             instructions=instructions,
             policy=self.domain_policy,
