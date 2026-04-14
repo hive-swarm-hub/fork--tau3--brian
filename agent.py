@@ -66,6 +66,8 @@ from compass import (
 # iterates REGISTRY.for_hook(...) instead of the old inline elif-cascade.
 from interventions import REGISTRY, HookContext  # noqa: F401
 from interventions import banking as _interventions_banking  # noqa: F401  (side effect: registrations)
+from interventions import account_class_kb_verify as _intervention_L  # noqa: F401  (brian: Intervention L)
+from interventions import verify_before_mutate as _intervention_K  # noqa: F401  (charlie: Intervention K, fixed by brian)
 
 # Banking-specific hooks live on an extension plugged into COMPASS. If the
 # banking extension is not registered (e.g., running this scaffold on a
@@ -716,6 +718,7 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
             "unlocked_for_agent": set(),    # names unlocked via unlock_discoverable_agent_tool
             "unlocked_for_user": set(),     # names given via give_discoverable_user_tool
             "kb_search_count": 0,           # how many KB_search (or shell) retrieval calls
+            "kb_queries": [],               # actual KB_search query strings (for gate verification)
             "gate_interventions": [],       # log of _gate_tool_calls rewrites (for debugging)
             # Retrieval mode — "bm25" (default KB_search) or "terminal_use"
             # (shell tool over KB docs on disk). Interventions may branch on
@@ -797,6 +800,9 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
                     # failure analyzers (extract_traces) keep working under
                     # both retrieval variants. Annotator behavior is unchanged.
                     self._task_state["kb_search_count"] += 1
+                    query = args.get("query", "")
+                    if query and isinstance(query, str):
+                        self._task_state.setdefault("kb_queries", []).append(query.lower())
                 # Domain-specific identity tracking: the extension decides
                 # which tool names reveal a user_id. Banking uses both
                 # get_user_information_by_id and get_credit_card_transactions_by_user;
