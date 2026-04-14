@@ -63,10 +63,12 @@ def account_class_kb_verify(ctx: HookContext) -> Optional[HookResult]:
     return HookResult(
         drop=True,
         drop_note=(
-            f"I'm about to open a {chosen} account but I haven't verified this "
-            f"is the right class for this customer's situation. I should "
-            f"KB_search for '{chosen}' to confirm eligibility and features "
-            f"before calling. The matcher scores the FIRST call attempt."
+            f"MANDATORY NEXT ACTION: The {chosen} call was blocked because I "
+            f"haven't read the KB doc for this account class yet. I MUST now "
+            f"call KB_search(query=\"{chosen} eligibility features\") to verify "
+            f"this is the right class for this customer. After reading the result, "
+            f"I will retry the open_bank_account_4821 call with the correct "
+            f"account_class value. DO NOT stop — do the KB_search immediately."
         ),
         log={
             "reason": "blocked_account_class_not_kb_verified",
