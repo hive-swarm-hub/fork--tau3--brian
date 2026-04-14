@@ -66,8 +66,6 @@ from compass import (
 # iterates REGISTRY.for_hook(...) instead of the old inline elif-cascade.
 from interventions import REGISTRY, HookContext  # noqa: F401
 from interventions import banking as _interventions_banking  # noqa: F401  (side effect: registrations)
-from interventions import account_class_kb_verify as _intervention_L  # noqa: F401  (brian: Intervention L)
-# K (verify-before-mutate) not imported — caused dispute_calculator regression when co-active with L
 
 # Banking-specific hooks live on an extension plugged into COMPASS. If the
 # banking extension is not registered (e.g., running this scaffold on a
@@ -108,65 +106,65 @@ def _parse_discoverable_catalog(source_path: Optional[Path] = None) -> dict:
 RETRIEVAL_VARIANT = os.environ.get("RETRIEVAL_VARIANT", "bm25")
 
 TERMINAL_PROMPT_SECTION = """
-## Terminal-mode retrieval (RETRIEVAL_VARIANT=terminal_use)
+## Terminal-mode retrieval
 
-You have a `shell` tool instead of `KB_search`. The banking KB is mounted as
-JSON/Markdown files on disk. Follow this exact workflow:
+You have a `shell` tool instead of `KB_search`. The KB is mounted as Markdown
+files on disk. Follow this WORKFLOW VERBATIM — do not improvise.
 
-### Step 1 — Orient (ALWAYS do this first)
-```
-ls -la
-```
-Discover the KB mount path (typically `./documents/` or `./`). Note the doc
-filename pattern: `doc_<category>_<slug>_NNN.md` (or `.json`).
+### Recommended workflow
+1. `ls` — see what files are available.
+2. `grep -ri "<keyword>" .` — case-insensitive recursive search.
+3. `cat <filename>` — read one (or several space-separated) docs.
+4. Unlock + call the discoverable tool you found.
 
-### Step 2 — Search with content (NEVER use grep -l)
-```
-grep -Rin "<keyword>" doc_<category>_* | head -n 50
-```
-CRITICAL rules:
-- Use `-Rin` (recursive, case-insensitive, line-numbers) so you see matching
-  CONTENT, not just filenames. **NEVER use `-l`** — you need the excerpts to
-  spot discoverable tool names like `submit_cash_back_dispute_0589`.
-- **ALWAYS pipe to `| head -n 50`** to prevent output explosion.
-- Target a doc category prefix when possible: `doc_bank_accounts_*`,
-  `doc_credit_cards_*`, `doc_checking_accounts_*`, `doc_savings_accounts_*`,
-  `doc_debit_cards_*`. This is MUCH faster than searching all docs.
-- If the first search returns nothing, broaden with alternation:
-  `grep -Rin "term1\\|term2\\|term3" doc_<category>_* | head -n 50`
+### The ONLY shell idioms you should use
+- `ls`
+- `grep -ri "<term>" .`
+- `grep -ri "<term>" doc_<category>_*` (scope by filename glob)
+- `grep -ri "<term>" . | grep "<second_term>"` (chained filter)
+- `cat <file>`
+- `cat <file1> <file2> <file3>` (batch read — read several docs at once)
 
-### Step 3 — Read the best hit (partial, not full)
-```
-sed -n '1,200p' <matched_file>
-```
-Use `sed -n 'START,ENDp'` for partial reads — most docs are 50-300 lines and
-you only need the relevant section. Use `cat` only for short docs (<100 lines).
+### DO NOT USE
+- `sed`, `rg`, `find`, `grep -R` (uppercase), `grep -l`, `sed -n 'X,Yp'`
+- Commands over 60 characters
+- Multi-pipe chains beyond `grep | grep`
+- `| head` is optional; ok to skip
 
-### Step 4 — Act IMMEDIATELY when you find a tool name
-CRITICAL: when grep or cat output contains a discoverable tool name (anything
-matching `<word>_<4+ digits>`, e.g. `order_replacement_credit_card_7291`),
-STOP searching and ACT:
-1. `unlock_discoverable_agent_tool(agent_tool_name="<exact_name>")`
-2. Then `call_discoverable_agent_tool(agent_tool_name="<exact_name>", arguments=...)`
-Do NOT continue grepping after finding the tool — the biggest failure mode
-in terminal_use is finding the tool name but then searching more instead of
-unlocking+calling it. Search → find tool → unlock → call → THEN search more
-if the task needs additional steps.
+### Behavioral rules (the mini-tier model discipline)
+1. On any task requiring KB lookup (procedures, products, eligibility rules):
+   your FIRST tool call should be `ls` to see what docs exist, then
+   `grep -ri "<keyword from user msg>" .` using a keyword from the customer's
+   message. Exception: pure identity lookup (e.g., "look up my account") can
+   skip straight to get_user_information_by_*.
+2. Do NOT ask clarifying questions before searching the KB. Search first,
+   clarify only if the KB lookup reveals a genuine ambiguity.
+3. After initial ls + grep, scope subsequent greps to `doc_<domain>_*`.
+4. If you have made fewer than 10 shell searches and are about to give up,
+   KEEP SEARCHING with reformulated keywords before responding "I cannot
+   find this" or escalating.
+5. When grep points at 2-3 relevant files, BATCH them in one `cat`:
+   `cat doc_credit_cards_001.md doc_credit_cards_002.md`
+6. Act immediately on discoverable tool names (`<word>_<4+digits>`): unlock,
+   then call, right after reading the doc that names them. Don't keep
+   searching after you've found the tool.
+7. NEVER respond with "Let me know if...", "Feel free to...", "I'll be here
+   when you're ready" — every response must either make a tool call or ask
+   ONE specific question needed for the next tool call.
+8. Search FIRST, clarify LATER. Only ask the user for info the KB cannot
+   provide (identity, personal preferences). Never ask "can you tell me more?"
+   before running `ls` and `grep`.
 
-### Step 5 — Repeat if needed
-If you need more info, go back to Step 2 with different keywords. Budget
-~30-50 shell commands per task. Systematic broadening is fine; aimless
-repetition is not.
-
-### KB_search replacement
-Wherever BASE INSTRUCTIONS say "KB_search", use shell grep/cat instead.
-All other rules (verification once, exact enums, minimalism) still apply.
+### Replacing KB_search references
+Wherever BASE INSTRUCTIONS say "KB_search", use `grep -ri` + `cat`. All other
+rules (verification once, exact enums, minimalism) still apply.
 """.strip()
 
 BASE_INSTRUCTIONS = """
 You are a customer service agent for a bank. You MUST follow the <policy> exactly. The policy is your sole source of truth — never invent rules, procedures, or information not in the policy or provided by the user.
 
-IMPORTANT: You have FULL access to the bank's knowledge base via KB_search and to all customer account data via the base tools. When a customer asks about products, policies, or account information, ALWAYS search KB and look up their data — do NOT say "I don't have enough information" or "I can't look that up." You are the agent; you have all the tools. Use them proactively.
+## Proactive tool use (CRITICAL for stronger models)
+You have FULL access to the bank's knowledge base and tool catalog. ALWAYS search the KB and use the tools available to you. Do NOT say "I don't have enough information" or "I cannot help with that" without first searching the KB and trying the available tools. If the customer asks about products, procedures, or wants to take an action, your DEFAULT response is to SEARCH first, then ACT — not to refuse or escalate. Only escalate after exhausting KB search and tool exploration.
 
 ## Critical rules
 1. Each turn: EITHER send a message to the user OR make a tool call. NEVER both at the same time.
@@ -194,12 +192,12 @@ Skip the search only for:
 - "Silver Rewards Card replacement order"
 - "checking account referral business"
 
-If the first search is unproductive, try different phrasings focusing on the symptom rather than the product — but avoid repeating the same concept more than twice.
+If the first search is unproductive, try different phrasings focusing on the symptom rather than the product — but avoid repeating the same concept more than twice. If identity verification fails on the first lookup method, try alternative methods (by_name, by_email, by_id) before escalating — the customer may have given a different identifier.
 
 **Escalation patterns to recognize:**
 - Customer's claimed CURRENT account field contradicts the DB → likely `account_ownership_dispute` → `transfer_to_human_agents`
 - Payment confirmed but not reflecting / balance discrepancy → likely a special discoverable transfer procedure (search KB with "payment not reflecting" or "backend incident")
-- Customer reports fraud, unauthorized activity, stolen card → search KB for specific dispute/freeze procedures
+- Customer reports fraud, unauthorized activity, stolen card, or unrecognized transactions → DO NOT escalate immediately. FIRST search KB for "fraud", "unauthorized", "replacement card", "dispute" to find the specific procedure. The KB has discoverable tools for filing disputes and ordering replacement cards. Only escalate after exhausting KB search.
 - Customer wants to submit their own dispute / referral / deposit → `give_discoverable_user_tool` not `unlock_discoverable_agent_tool`
 
 ## Tool system
@@ -213,7 +211,7 @@ Your initial tool list contains:
    - `change_user_email` — only for legitimate email changes where the customer's claimed CURRENT email matches the DB.
    - `transfer_to_human_agents(reason, summary)` — escalation. For specific incidents (e.g., 11/13 backend payment incident, purchase-decline human-transfer protocol), the task may instead require a discoverable `initial_transfer_to_human_agent_NNNN` or `emergency_*_transfer_1114` variant BEFORE this one.
    - `get_current_time`
-   - `KB_search(query)` — BM25 search over 698 banking policy/procedure docs.
+   - `KB_search(query)` — BM25 search over 698 banking policy/procedure docs. (In terminal_use mode, this is replaced by a `shell` tool — see terminal-mode section below.)
 
 2. DISCOVERY meta-tools — always available, used to activate the 48 discoverable tools in the catalog below:
    - `list_discoverable_agent_tools()` — shows what you've already unlocked this task
@@ -221,7 +219,7 @@ Your initial tool list contains:
    - `give_discoverable_user_tool(discoverable_tool_name="<exact_name>")` — activates a tool for the CUSTOMER to call (for the 4 user-side tools, OR when the agent-side tool's procedure doc says the customer performs it)
    - `call_discoverable_agent_tool(agent_tool_name="<name>", arguments="<JSON STRING>")` — invokes a previously-unlocked tool. **`arguments` MUST be a JSON-encoded string, NOT a dict.** Pass `'{"user_id":"u1"}'` not `{"user_id":"u1"}`.
 
-The catalog below lists every discoverable tool that exists. When a customer's situation maps to one of these tools, you can unlock/give it directly without requiring a KB_search first. Still use KB_search for procedure context and enum constraint details.
+The catalog below lists every discoverable tool that exists. When a customer's situation maps to one of these tools, you can unlock/give it directly without requiring a KB search first. Still use KB search for procedure context and enum constraint details.
 
 {CATALOG}
 
@@ -718,7 +716,7 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
             "unlocked_for_agent": set(),    # names unlocked via unlock_discoverable_agent_tool
             "unlocked_for_user": set(),     # names given via give_discoverable_user_tool
             "kb_search_count": 0,           # how many KB_search (or shell) retrieval calls
-            "kb_queries": [],               # actual KB_search query strings (for gate verification)
+            "kb_queries": [],               # actual query strings (for Intervention K verify gate)
             "gate_interventions": [],       # log of _gate_tool_calls rewrites (for debugging)
             # Retrieval mode — "bm25" (default KB_search) or "terminal_use"
             # (shell tool over KB docs on disk). Interventions may branch on
@@ -800,8 +798,10 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
                     # failure analyzers (extract_traces) keep working under
                     # both retrieval variants. Annotator behavior is unchanged.
                     self._task_state["kb_search_count"] += 1
-                    query = args.get("query", "")
-                    if query and isinstance(query, str):
+                    # Track actual query content for Intervention K verify gate.
+                    # KB_search uses 'query'; shell uses 'command' (full grep cmd).
+                    query = (args.get("query") or args.get("command") or "")
+                    if query:
                         self._task_state.setdefault("kb_queries", []).append(query.lower())
                 # Domain-specific identity tracking: the extension decides
                 # which tool names reveal a user_id. Banking uses both
@@ -1072,6 +1072,38 @@ class CustomAgent(HalfDuplexAgent[BankingAgentState]):
 
         # 6. Gate hook — swarm agents put rewrite rules here. NO-OP by default.
         assistant_msg = self._gate_tool_calls(assistant_msg)
+
+        # 6b. Anti-passive-wait gate: detect when the agent is sending the
+        # same text twice in a row with no tool calls. This catches the
+        # gpt-5.4-mini max_steps loop where it says "Okay" or "I'll be
+        # ready when you are" repeatedly. Inject a directive on the second
+        # repeat to take a tool action. Only applies to text-only messages
+        # (tool calls are fine to repeat).
+        if (assistant_msg.content
+                and not assistant_msg.tool_calls
+                and len(assistant_msg.content.strip()) < 200):
+            prev_text = self._task_state.get("_last_text_response", "")
+            curr_text = assistant_msg.content.strip().lower()
+            if prev_text and curr_text == prev_text:
+                # Force a directive into the message so the LLM sees it
+                # next turn and takes a tool action instead.
+                assistant_msg = AssistantMessage(
+                    role="assistant",
+                    content=(
+                        assistant_msg.content
+                        + " [SYSTEM: I noticed I just repeated this exact response. "
+                        "I should NOT wait passively — I should look up the customer's "
+                        "info myself with the tools available, or end the conversation "
+                        "if the task is complete.]"
+                    ),
+                    tool_calls=None,
+                )
+                self._task_state["_last_text_response"] = ""  # reset
+            else:
+                self._task_state["_last_text_response"] = curr_text
+        elif assistant_msg.tool_calls:
+            # Reset on any tool action
+            self._task_state["_last_text_response"] = ""
 
         # 7. Track consecutive tool calls for the loop breaker
         if assistant_msg.tool_calls:
