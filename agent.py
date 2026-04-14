@@ -67,7 +67,7 @@ from compass import (
 from interventions import REGISTRY, HookContext  # noqa: F401
 from interventions import banking as _interventions_banking  # noqa: F401  (side effect: registrations)
 from interventions import account_class_kb_verify as _intervention_L  # noqa: F401  (brian: Intervention L)
-from interventions import verify_before_mutate as _intervention_K  # noqa: F401  (charlie: Intervention K, fixed by brian)
+# K (verify-before-mutate) not imported — caused dispute_calculator regression when co-active with L
 
 # Banking-specific hooks live on an extension plugged into COMPASS. If the
 # banking extension is not registered (e.g., running this scaffold on a
