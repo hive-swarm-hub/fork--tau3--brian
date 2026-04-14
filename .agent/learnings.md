@@ -97,6 +97,18 @@ Note: P4 fixes are COUPLED — fixing loop detection may regress under-action, f
 - [CROSS] BM25 ceiling = embedding ceiling ≈ 11/97 (11.3%). Matches GPT-5.2 no-reasoning at 12.4%. Both confirmed independently by brian2 empirical runs + 8-model trajectory analysis.
 - [CROSS] apply_for_credit_card is customer-side (5+ tasks). Agent can't force it. (brian2 trace analysis)
 
+## gpt-5.4-mini findings (brian, 2026-04-13)
+
+- [CROSS] **Model swap alone does NOT improve score** — gpt-5.4-mini with brian2's gpt-4.1-mini-optimized harness scores 7-8/97 vs gpt-4.1-mini's 11/97. The newer model is MORE CAUTIOUS: on task_001 (a canary) it refused to list credit card products, saying "I don't have enough verified account information to look up personalized card options." gpt-4.1-mini just searched KB and shared what it found. (brian, 2 full evals on gpt-5.4-mini)
+
+- [POS] **Proactive tool-use directive fixes gpt-5.4-mini over-caution**: adding a single paragraph to BASE_INSTRUCTIONS — "You have FULL access to the bank's knowledge base via KB_search... ALWAYS search KB and look up their data — do NOT say 'I don't have enough information'" — lifted lite from 4/20 (raw/no interventions) and 6/20 (all interventions, no directive) to 7/20. Full eval went 7/97 → 8/97. Not a full recovery to 11/97 but a genuine lift. The directive tells the model it's authorized to use its tools. (brian, commit 449a5d6)
+
+- [CROSS] **task_032 is a NEW pass on gpt-5.4-mini**: this task has NEVER passed on gpt-4.1-mini across any run in the swarm. gpt-5.4-mini solves it with the proactive prompt fix. Confirms the stronger model CAN unlock tasks the weaker one can't — but only if the harness is adapted. Interventions optimized for gpt-4.1-mini (compensating for its specific weaknesses) don't fully transfer to gpt-5.4-mini.
+
+- [NEG] Intervention K (verify-before-mutate from charlie) would block `transfer_to_human_agents` because "transfer_" is in MUTATION_PREFIXES. But transfer_to_human_agents is an ESCALATION, not a DB mutation, and some tasks (task_008) require transfer WITHOUT prior verification. Fix: exclude transfer_ from MUTATION_PREFIXES, add file_/freeze_/unfreeze_/order_/activate_ instead. Note: K wasn't actually loaded by agent.py (requires explicit import), so the bug didn't affect the eval. Fix is committed for future activation. (brian, commit 3c72ac2)
+
+- [CROSS] **Swarm optimization is model-specific.** The harness optimized for gpt-4.1-mini (6→11/97, 83% improvement) achieves only 8/97 on gpt-5.4-mini without re-tuning. Model upgrades require re-running the swarm's optimization loop, not just swapping SOLVER_MODEL. This is the honest finding for anyone reading these learnings: the 83% lift is the MODEL-HARNESS PAIRING, not transferable. (brian, 2 full evals)
+
 ---
 
 ## Meta-improvements
