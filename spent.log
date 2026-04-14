@@ -1,0 +1,7 @@
+session=2026-04-14 budget=30
+0.00 init
+1.00 lite bm25_reranker baseline
+1.50 lite oai_emb_reranker (slightly more $ for embeddings)
+1.00 lite bm25_grep
+1.50 lite openai_embeddings
+6.00 full bm25_grep
